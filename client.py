@@ -1,4 +1,3 @@
-import os
 import base64
 import datetime
 import random
@@ -12,6 +11,7 @@ from controller import EncryptionController
 from cryptography.hazmat.primitives.asymmetric.dh import DHParameterNumbers
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
+
 
 encryption_ctrl = None
 user = None
