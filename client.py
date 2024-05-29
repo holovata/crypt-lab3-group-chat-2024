@@ -51,24 +51,24 @@ pub_key = dh.generate_public_key(priv_key)
 
 # Функція для серіалізації публічного ключа у строку
 def serialize_pub_key(pub_key):
-    public_bytes = pub_key.public_bytes(
+    pub_bytes = pub_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    return base64.b64encode(public_bytes).decode("utf-8")
+    return base64.b64encode(pub_bytes).decode("utf-8")
 
 
 # Функція для десеріалізації строки у публічний ключ
 def deserialize_pub_key(pub_key_str):
-    public_bytes = base64.b64decode(pub_key_str.encode("utf-8"))
-    return serialization.load_pem_public_key(public_bytes)
+    pub_bytes = base64.b64decode(pub_key_str.encode("utf-8"))
+    return serialization.load_pem_public_key(pub_bytes)
 
 
-# Функція для генерації унікального юзернейму
+# Функція для генерації юзернейму
 def create_username():
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-    return f"user_{timestamp}_{random_str}"
+    random_string = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    return f"user_{timestamp}_{random_string}"
 
 
 # Функція для надсилання повідомлень від користувача в активному стані
@@ -103,7 +103,7 @@ async def handle_messages(ws):
         elif "state" in data:
             global state
             state = data["state"]
-            print(f"Перехід до стану: {state}")
+            print(f"Перехід до стану {state}.")
             if state == KEY_SETUP_PHASE1:
                 await handle_key_setup1(ws, data)
             elif state == KEY_SETUP_PHASE2:
@@ -115,7 +115,7 @@ async def handle_messages(ws):
 # Функція для обробки стану KEY_SETUP_PHASE1
 async def handle_key_setup1(ws, data):
     global participant_count
-    participant_count = data["number_of_participants"]
+    participant_count = data["participant_count"]
     await ws.send(
         json.dumps({"pub_key": serialize_pub_key(pub_key)})
     )
@@ -131,15 +131,15 @@ async def handle_key_setup2(ws, data):
         priv_key, first_pub_key
     )
     my_sym_key, my_salt = dh.derive_key(shared_secret)
-    decrypted_K = dh.decrypt_message(
+    dec_key = dh.decrypt_message(
         my_sym_key,
         base64.b64decode(data["encrypted_K"].encode("utf-8")),
     )
 
-    SHARED_KEY = decrypted_K
+    SHARED_KEY = dec_key
     encryption_ctrl = EncryptionController(SHARED_KEY)
     print(SHARED_KEY)
-    print("EncryptionController")
+    print("Encryption Controller:")
     print(encryption_ctrl)
 
     await ws.send(json.dumps({"state": ACTIVE}))
