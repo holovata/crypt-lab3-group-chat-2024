@@ -8,43 +8,54 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from controller import EncryptionController
 import base64
+import datetime
+import random
+import string
 
 encryptionController = None
 
 user_info = None
 
-lobbyState = "lobby"
-preparingOneState = "preparing_1"
-preparingTwoState = "preparing_2"
-chatState = "chat"
+lobbyState = "lobby"  # Початковий стан лобі
+preparingOneState = "preparing_1"  # Стан підготовки першого етапу
+preparingTwoState = "preparing_2"  # Стан підготовки другого етапу
+chatState = "chat"  # Стан чату
 
-current_state = lobbyState
+server_state = lobbyState  # Поточний стан системи
 
+# Параметри для алгоритму Диффі-Геллмана
 p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
 g = 2
 
 params_numbers = DHParameterNumbers(p, g)
 parameters = params_numbers.parameters(default_backend())
 
+# Генерація приватного та публічного ключів для користувача
 private_key = dh.generate_private_key(parameters)
 public_key = dh.generate_public_key(private_key)
 
-number_of_participants = 0
-processed_number_of_participants = 0
+number_of_participants = 0  # Кількість учасників
+processed_number_of_participants = 0  # Лічильник оброблених учасників
 
-# First user data
-participants_public_keys = {}
-participants_shared_keys = {}
-participants_symmetric_keys = {}
-participants_salts = {}
+# Дані для першого користувача
+participants_public_keys = {}  # Публічні ключі учасників
+participants_shared_keys = {}  # Спільні ключі учасників
+participants_symmetric_keys = {}  # Симетричні ключі учасників
+participants_salts = {}  # Соли учасників
 
-# Non-first user data
-own_symmetric_key = None
-own_salt = None
+# Дані для не першого користувача
+own_symmetric_key = None  # Власний симетричний ключ
+own_salt = None  # Власна сіль
 
-KEY = None
+KEY = None  # Загальний ключ
 
+# Функція для генерації унікального юзернейму
+def generate_username():
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    return f"user_{timestamp}_{random_str}"
 
+# Функція для серіалізації публічного ключа у строку
 def serialize_public_key(public_key):
     public_bytes = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
@@ -52,23 +63,23 @@ def serialize_public_key(public_key):
     )
     return base64.b64encode(public_bytes).decode("utf-8")
 
-
+# Функція для десеріалізації строки у публічний ключ
 def deserialize_public_key(public_key_str):
     public_bytes = base64.b64decode(public_key_str.encode("utf-8"))
     return serialization.load_pem_public_key(public_bytes)
 
-
+# Функція для надсилання повідомлень від користувача у стані чату
 async def send_user_messages(websocket):
-    global encryptionController, current_state
+    global encryptionController, server_state
 
     while current_state == chatState:
-        message = await asyncio.to_thread(input, "Enter message: ")
+        message = await asyncio.to_thread(input, "Введіть повідомлення: ")
         message_json = encryptionController.create_message_json(
             message, user_info["username"]
         )
         await websocket.send(json.dumps(message_json))
 
-
+# Функція для підключення до сервера та обробки повідомлень
 async def send_messages():
     global \
         participants_public_keys, \
@@ -84,9 +95,9 @@ async def send_messages():
 
     uri = "ws://localhost:8090"
     async with websockets.connect(uri) as websocket:
-        # Send identifying information upon connection
+        # Надсилання ідентифікаційної інформації при підключенні
         user_info = {
-            "username": "bob" + str(os.urandom(4).hex()),
+            "username": generate_username(),
             "public_key": serialize_public_key(public_key),
         }
         await websocket.send(json.dumps(user_info))
@@ -97,9 +108,9 @@ async def send_messages():
             if "error" in data:
                 print(data["error"])
             elif "state" in data:
-                global current_state
+                global server_state
                 current_state = data["state"]
-                print(f"State transitioned to: {current_state}")
+                print(f"Перехід до стану: {current_state}")
                 if current_state == preparingOneState:
                     number_of_participants = data["number_of_participants"]
                     await websocket.send(
@@ -126,11 +137,11 @@ async def send_messages():
 
                     await websocket.send(json.dumps({"state": chatState}))
                 if current_state == chatState:
-                    print("Chat state reached")
+                    print("Досягнуто стану чату")
                     messageList = [
-                        "Hello, World!",
-                        "This is a test message",
-                        "Goodbye!",
+                        "Привіт, світ!",
+                        "Це тестове повідомлення",
+                        "До побачення!",
                     ]
                     for message in messageList:
                         message_json = encryptionController.create_message_json(
@@ -140,11 +151,11 @@ async def send_messages():
                     # asyncio.create_task(send_user_messages(websocket))
 
             elif current_state == preparingOneState:
-                # First user flow:
+                # Обробка повідомлень для першого користувача:
                 participants_public_keys[data["username"]] = deserialize_public_key(
                     data["public_key"]
                 )
-                print("Participants public keys:")
+                print("Публічні ключі учасників:")
                 print(participants_public_keys[data["username"]])
                 print(public_key)
                 print(private_key)
@@ -181,10 +192,10 @@ async def send_messages():
                 json_data = json.loads(data)
                 encrypted_message = json_data["message"]
                 iv = json_data["init_vector"]
-                print("Encrypted Message")
+                print("Зашифроване повідомлення")
                 print(encrypted_message)
                 decrypted_message = encryptionController.decrypt(iv, encrypted_message)
-                print("Decrypted Message")
+                print("Розшифроване повідомлення")
                 print(decrypted_message)
 
 

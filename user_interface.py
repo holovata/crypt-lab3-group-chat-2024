@@ -1,4 +1,12 @@
 import tkinter as tk
+'''цей файл, здається, можна видалити??'''
+
+
+
+
+
+
+
 
 class ChatWindow:
     def __init__(self, root):

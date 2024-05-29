@@ -1,152 +1,184 @@
+import json
 import asyncio
 import websockets
-import json
-
-connected_users = {}
-
-lobbyState = "lobby"
-preparingOneState = "preparing_1"
-preparingTwoState = "preparing_2"
-chatState = "chat"
-
-current_state = lobbyState
-
-ready_users = 0
 
 
-async def handler(websocket: websockets.WebSocketServerProtocol, path: str):
-    global current_state, ready_users
-    try:
-        if current_state != lobbyState:
-            await websocket.send(
+WAITING = "waiting"             # Початковий стан очікування
+ACTIVE = "active"               # Стан активності
+KEY_SETUP_PHASE1 = "setup1"     # Стан встановлення спільних ключів шифрування
+KEY_SETUP_PHASE2 = "setup2"     # Стан завершення підготовки
+server_state = WAITING
+
+connected_users_list = {}
+num_ready_users = 0             # Лічильник готових до переходу на наступний етап користувачів
+
+
+async def initial_connection(ws, user):
+    connected_users_list[ws] = user
+    print(f"Підключено користувача {user}.")
+
+
+async def handle_key_setup1(ws, data):
+    global server_state
+    if "state" in data and data["state"] == KEY_SETUP_PHASE2:
+        server_state = KEY_SETUP_PHASE2
+        enc_key = data["enc_key"]
+        await send_encrypted_keys_to_users(ws, enc_key, data)
+    elif "public_key" in data:
+        await store_public_key_and_notify_first_user(ws, data)
+
+
+async def send_encrypted_keys_to_users(ws, enc_key, data):
+    for user in connected_users_list:
+        if user != ws:
+            await user.send(
                 json.dumps(
                     {
-                        "error": f"No new connections allowed, current state is {current_state}"
+                        "state": server_state,
+                        "encrypted_key": enc_key[connected_users_list[user]["username"]],
+                        "first_user_public_key": data["first_user_public_key"],
                     }
                 )
             )
-            await websocket.close()
+
+
+async def store_public_key_and_notify_first_user(ws, data):
+    connected_users_list[ws]["public_key"] = data["public_key"]
+    first_user = list(connected_users_list.keys())[0]
+    if ws != first_user:
+        await first_user.send(
+            json.dumps(
+                {
+                    "public_key": data["public_key"],
+                    "username": connected_users_list[ws]["username"],
+                }
+            )
+        )
+
+
+async def handle_key_setup2(ws, data):
+    global server_state, num_ready_users
+    if "state" in data and data["state"] == ACTIVE:
+        num_ready_users += 1
+    if num_ready_users >= len(connected_users_list) - 1:
+        server_state = ACTIVE
+        await notify_users_of_active_state()
+
+
+async def notify_users_of_active_state():
+    for user in connected_users_list:
+        await user.send(json.dumps({"state": server_state}))
+
+
+async def handle_active_state(ws, data):
+    print("Досягнуто активного стану.")
+    print(data)
+    await broadcast_except_sender(json.dumps(data), ws)
+
+
+async def handle_message(ws, msg):
+    data = json.loads(msg)
+    if server_state == KEY_SETUP_PHASE1:
+        await handle_key_setup1(ws, data)
+    elif server_state == KEY_SETUP_PHASE2:
+        await handle_key_setup2(ws, data)
+    elif server_state == ACTIVE:
+        await handle_active_state(ws, data)
+    else:
+        await ws.send(json.dumps({"error": "Чат ще не розпочато."}))
+
+
+async def handler(ws: websockets.WebSocketServerProtocol, path: str):
+    global server_state
+    try:
+        if server_state != WAITING:
+            await ws.send(
+                json.dumps(
+                    {
+                        "error": f"Нові підключення не дозволені. Поточний стан: {server_state}."
+                    }
+                )
+            )
+            await ws.close()
             return
 
-        # Receive initial message containing user info
-        user_info = await websocket.recv()
-        user_info = json.loads(user_info)
-        connected_users[websocket] = user_info
-        print(f"User connected: {user_info}")
+        user = await ws.recv()
+        user = json.loads(user)
+        await initial_connection(ws, user)
 
-        async for message in websocket:
-            data = json.loads(message)
-            if current_state == preparingOneState:
-                if "state" in data and data["state"] == preparingTwoState:
-                    current_state = preparingTwoState
-                    encrypted_K = data["encrypted_K"]
-
-                    for user in connected_users:
-                        if user != websocket:
-                            await user.send(
-                                json.dumps(
-                                    {
-                                        "state": current_state,
-                                        "encrypted_K": encrypted_K[
-                                            connected_users[user]["username"]
-                                        ],
-                                        "first_user_public_key": data[
-                                            "first_user_public_key"
-                                        ],
-                                    }
-                                )
-                            )
-
-                elif "public_key" in data:
-                    connected_users[websocket]["public_key"] = data["public_key"]
-                    first_user = list(connected_users.keys())[0]
-                    if websocket != first_user:
-                        print(first_user)
-                        await first_user.send(
-                            json.dumps(
-                                {
-                                    "public_key": data["public_key"],
-                                    "username": user_info["username"],
-                                }
-                            )
-                        )
-            elif current_state == preparingTwoState:
-                if "state" in data and data["state"] == chatState:
-                    ready_users += 1
-                if ready_users >= len(connected_users) - 1:
-                    current_state = chatState
-                    for user in connected_users:
-                        await user.send(json.dumps({"state": current_state}))
-            elif current_state == chatState:
-                print("Chat state reached")
-                print(data)
-                await broadcast(json.dumps(data), websocket)
-
-            else:
-                await websocket.send(json.dumps({"error": "Chat has not started yet"}))
+        async for msg in ws:
+            await handle_message(ws, msg)
     except websockets.ConnectionClosed as e:
-        print(
-            f"Client disconnected: {websocket.remote_address} with code {e.code} and reason: {e.reason}"
-        )
+        await disconnection(ws, e)
     finally:
-        if websocket in connected_users:
-            print(f"Connection with {connected_users[websocket]} closed")
-            del connected_users[websocket]
+        if ws in connected_users_list:
+            print(f"З'єднання з користувачем {connected_users_list[ws]} закрито.")
+            del connected_users_list[ws]
 
 
-async def broadcast(message, sender=None):
-    if connected_users:  # Check if there are any connected users
+async def disconnection(ws, e):
+    print(
+        f"Клієнт відключився: {ws.remote_address} з кодом {e.code} та причиною: {e.reason}."
+    )
+
+
+# Функція для трансляції повідомлення всім користувачам, окрім відправника
+async def broadcast_except_sender(msg, sender=None):
+    if connected_users_list:  # Перевірка, чи є підключені користувачі
         destinations = [
-            user.send(message) for user in connected_users if user != sender
+            user.send(msg) for user in connected_users_list if user != sender
         ]
         if destinations:
             await asyncio.wait(destinations)
 
 
-async def broadcastToEveryoneExceptFirst(message):
-    if connected_users:  # Check if there are any connected users
-        destinations = [user.send(message) for user in connected_users[1:]]
+# Функція для трансляції повідомлення всім користувачам, окрім першого
+async def broadcast_except_first(msg):
+    if connected_users_list:  # Перевірка, чи є підключені користувачі
+        destinations = [user.send(msg) for user in connected_users_list[1:]]
         if destinations:
             await asyncio.wait(destinations)
 
 
-async def handle_start_command():
-    global current_state
-    current_state = preparingOneState
-    await broadcast(
+# Функція для обробки команди "run" та переходу до стану "setup1"
+async def run_command():
+    global server_state
+    server_state = KEY_SETUP_PHASE1
+    await broadcast_except_sender(
         json.dumps(
-            {"state": current_state, "number_of_participants": len(connected_users)}
+            {"state": server_state, "number_of_participants": len(connected_users_list)}
         )
     )
 
 
-async def terminal_input(stop_event):
+# Функція для обробки вводу з терміналу
+async def input_from_terminal(stop_event):
     while True:
         command = await asyncio.to_thread(input, "")
-        if command.lower() == "start" and current_state == "lobby":
-            await handle_start_command()
-            print("Transitioning to chat state...")
-        elif command.lower() == "stop":
-            print("Stopping server...")
+        if command.lower() == "run" and server_state == "waiting":
+            await run_command()
+            print("Перехід до стану підготовки.")
+        elif command.lower() == "quit":
+            print("Зупинка сервера.")
             stop_event.set()
             break
         else:
-            print(f"Unknown command: {command}")
+            print(f"Невідома команда: {command}.")
 
 
+# Основна функція для запуску сервера та обробки вводу
 async def main():
     stop_event = asyncio.Event()
     server = await websockets.serve(handler, "localhost", 8090)
-    input_task = asyncio.create_task(terminal_input(stop_event))
+    input_task = asyncio.create_task(input_from_terminal(stop_event))
 
     await stop_event.wait()
     server.close()
     await server.wait_closed()
     await input_task
 
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Server stopped by user")
+        print("Сервер зупинено користувачем.")
