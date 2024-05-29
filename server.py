@@ -7,7 +7,7 @@ WAITING = "waiting"             # Початковий стан очікуван
 ACTIVE = "active"               # Стан активності
 KEY_SETUP_PHASE1 = "setup1"     # Стан встановлення спільних ключів шифрування
 KEY_SETUP_PHASE2 = "setup2"     # Стан завершення підготовки
-server_state = WAITING
+state = WAITING
 
 connected_users_list = {}
 num_ready_users = 0             # Лічильник готових до переходу на наступний етап користувачів
@@ -19,9 +19,9 @@ async def initial_connection(ws, user):
 
 
 async def handle_key_setup1(ws, data):
-    global server_state
+    global state
     if "state" in data and data["state"] == KEY_SETUP_PHASE2:
-        server_state = KEY_SETUP_PHASE2
+        state = KEY_SETUP_PHASE2
         enc_key = data["enc_key"]
         await send_encrypted_keys_to_users(ws, enc_key, data)
     elif "public_key" in data:
@@ -34,7 +34,7 @@ async def send_encrypted_keys_to_users(ws, enc_key, data):
             await user.send(
                 json.dumps(
                     {
-                        "state": server_state,
+                        "state": state,
                         "encrypted_key": enc_key[connected_users_list[user]["username"]],
                         "first_user_public_key": data["first_user_public_key"],
                     }
@@ -57,45 +57,45 @@ async def store_public_key_and_notify_first_user(ws, data):
 
 
 async def handle_key_setup2(ws, data):
-    global server_state, num_ready_users
+    global state, num_ready_users
     if "state" in data and data["state"] == ACTIVE:
         num_ready_users += 1
     if num_ready_users >= len(connected_users_list) - 1:
-        server_state = ACTIVE
+        state = ACTIVE
         await notify_users_of_active_state()
 
 
 async def notify_users_of_active_state():
     for user in connected_users_list:
-        await user.send(json.dumps({"state": server_state}))
+        await user.send(json.dumps({"state": state}))
 
 
 async def handle_active_state(ws, data):
-    print("Досягнуто активного стану.")
+    print("Перехід до активного стану.")
     print(data)
     await broadcast_except_sender(json.dumps(data), ws)
 
 
 async def handle_message(ws, msg):
     data = json.loads(msg)
-    if server_state == KEY_SETUP_PHASE1:
+    if state == KEY_SETUP_PHASE1:
         await handle_key_setup1(ws, data)
-    elif server_state == KEY_SETUP_PHASE2:
+    elif state == KEY_SETUP_PHASE2:
         await handle_key_setup2(ws, data)
-    elif server_state == ACTIVE:
+    elif state == ACTIVE:
         await handle_active_state(ws, data)
     else:
         await ws.send(json.dumps({"error": "Чат ще не розпочато."}))
 
 
 async def handler(ws: websockets.WebSocketServerProtocol, path: str):
-    global server_state
+    global state
     try:
-        if server_state != WAITING:
+        if state != WAITING:
             await ws.send(
                 json.dumps(
                     {
-                        "error": f"Нові підключення не дозволені. Поточний стан: {server_state}."
+                        "error": f"Нові підключення не дозволені. Поточний стан: {state}."
                     }
                 )
             )
@@ -142,11 +142,11 @@ async def broadcast_except_first(msg):
 
 # Функція для обробки команди "run" та переходу до стану "setup1"
 async def run_command():
-    global server_state
-    server_state = KEY_SETUP_PHASE1
+    global state
+    state = KEY_SETUP_PHASE1
     await broadcast_except_sender(
         json.dumps(
-            {"state": server_state, "number_of_participants": len(connected_users_list)}
+            {"state": state, "number_of_participants": len(connected_users_list)}
         )
     )
 
@@ -155,7 +155,7 @@ async def run_command():
 async def input_from_terminal(stop_event):
     while True:
         command = await asyncio.to_thread(input, "")
-        if command.lower() == "run" and server_state == "waiting":
+        if command.lower() == "run" and state == "waiting":
             await run_command()
             print("Перехід до стану підготовки.")
         elif command.lower() == "quit":
