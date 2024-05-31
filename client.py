@@ -114,7 +114,7 @@ async def handle_messages(ws):
 # Функція для обробки стану KEY_SETUP_PHASE1
 async def handle_key_setup1(ws, data):
     global participant_count
-    participant_count = data["participant_count"]
+    participant_count = data["number_of_participants"]
     await ws.send(
         json.dumps({"pub_key": serialize_pub_key(pub_key)})
     )
