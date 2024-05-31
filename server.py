@@ -132,14 +132,6 @@ async def broadcast_except_sender(msg, sender=None):
             await asyncio.wait(destinations)
 
 
-# Функція для трансляції повідомлення всім користувачам, окрім першого
-async def broadcast_except_first(msg):
-    if connected_users_list:  # Перевірка, чи є підключені користувачі
-        destinations = [user.send(msg) for user in connected_users_list[1:]]
-        if destinations:
-            await asyncio.wait(destinations)
-
-
 # Функція для обробки команди "run" та переходу до стану "setup1"
 async def run_command():
     global state
