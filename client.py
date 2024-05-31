@@ -128,7 +128,7 @@ async def main():
                     encryptionController = EncryptionController(shared_key)
                     print(f"Спільний ключ: {shared_key}.")
                     print("Encryption Controller ініціалізовано.")
-                    print(encryptionController)
+                    print(encryptionController.key)
 
                     await websocket.send(json.dumps({"state": ACTIVE}))
 
@@ -144,9 +144,19 @@ async def main():
             elif current_state == KEY_SETUP_PHASE1:
                 pub_keys[data["username"]] = deserialize_key(data["public_key"])
                 print("Публічні ключі учасників:")
-                print(pub_keys[data["username"]])
-                print(public_key)
-                print(private_key)
+                print(pub_keys[data["username"]].public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode())
+                print(public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode())
+                print(private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ).decode())
                 shared_keys[data["username"]] = dh.generate_shared_key(private_key, pub_keys[data["username"]])
                 sym_keys[data["username"]], salts[data["username"]] = dh.derive_key(shared_keys[data["username"]])
                 processed_participants_number += 1
