@@ -28,7 +28,6 @@ shared_keys = {}  # Спільні ключі учасників
 sym_keys = {}  # Симетричні ключі учасників
 salts = {}  # Солі учасників
 
-# Дані для не першого користувача
 my_sym_key = None  # Власний симетричний ключ
 my_salt = None  # Власна сіль
 
@@ -71,7 +70,7 @@ def create_username():
     return f"user_{timestamp}_{random_string}"
 
 
-# Функція для надсилання повідомлень від користувача в активному стані
+'''
 async def send_user_msg(ws):
     global encryption_ctrl, state
 
@@ -80,7 +79,7 @@ async def send_user_msg(ws):
         message_json = encryption_ctrl.create_message_json(
             message, user["username"]
         )
-        await ws.send(json.dumps(message_json))
+        await ws.send(json.dumps(message_json))'''
 
 
 # Функція для обробки підключення до сервера та відправки ідентифікаційної інформації
